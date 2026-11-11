@@ -352,7 +352,9 @@ pub async fn run_daemon(server_name: &str, config: ServerConfig) -> Result<(), C
                 debug(&format!("[daemon:{}] Idle timeout reached, shutting down", server_name));
                 break;
             }
-            _ = tokio::signal::ctrl_c() => {
+            // A headless Windows daemon has no console control handler.
+            // Only an actual Ctrl+C signal should stop it, not a registration error.
+            Ok(()) = tokio::signal::ctrl_c() => {
                 debug(&format!("[daemon:{}] SIGINT received, shutting down", server_name));
                 break;
             }

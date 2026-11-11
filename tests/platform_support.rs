@@ -141,16 +141,13 @@ async fn stdio_direct_and_daemon_reuse_restart_and_large_requests() {
 async fn windows_batch_command_resolves_path_and_preserves_arguments() {
     let server = Server::new(json!({"command": fixture()}));
     let script = server.dir.join("fixture runner.cmd");
-    // The fixture records startup through the configured environment.
-    std::fs::write(
-        &script,
-        format!("@echo off\r\n\"{}\" %*\r\n", fixture().display()),
-    )
-    .unwrap();
+    // Keep the batch source ASCII: cmd.exe decodes script bytes using its code page.
+    // Unicode executable paths travel through the Unicode environment instead.
+    std::fs::write(&script, "@echo off\r\n\"%MCP_TEST_FIXTURE%\" %*\r\n").unwrap();
     let log = server.dir.join("start.log");
     server.write(json!({"command": "fixture runner", "cwd": server.dir,
         "args": ["space value", "中文", "a&b", "a\"b"],
-        "env": {"PATH": server.dir, "START_LOG": log,
+        "env": {"PATH": server.dir, "START_LOG": log, "MCP_TEST_FIXTURE": fixture(),
             "EXPECT_ARGS": "space value|中文|a&b|a\"b", "EXPECT_CWD": server.dir}}));
     let first = server.call(true, "{}").await;
     assert_eq!(first, server.call(true, "{}").await);
