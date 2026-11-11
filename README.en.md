@@ -24,14 +24,14 @@ A lightweight Rust CLI and library for interacting with [MCP (Model Context Prot
 ### 1. Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/doggy8088/mcp-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Coooolfan/mcp-cli/main/install.sh | bash
 ```
 
 or 
 
 ```bash
 # requires Cargo installed
-cargo install --git https://github.com/doggy8088/mcp-cli
+cargo install --git https://github.com/Coooolfan/mcp-cli
 ```
 
 ### 2. Create a config file
@@ -93,7 +93,7 @@ Add the crate to another Rust project:
 
 ```toml
 [dependencies]
-mcp-cli = { git = "https://github.com/doggy8088/mcp-cli" }
+mcp-cli = { git = "https://github.com/Coooolfan/mcp-cli" }
 ```
 
 Use `McpClient` for the common workflow:
@@ -382,8 +382,8 @@ Restrict which tools are available from a server using `allowedTools` and `disab
 
 The CLI searches for configuration in this order:
 
-1. `MCP_CONFIG_PATH` environment variable
-2. `-c/--config` command line argument
+1. `-c/--config` command line argument
+2. `MCP_CONFIG_PATH` environment variable
 3. `./mcp_servers.json` (current directory)
 4. `~/.mcp_servers.json`
 5. `~/.config/mcp/mcp_servers.json`
@@ -580,13 +580,13 @@ The CLI includes **automatic retry with exponential backoff** for transient fail
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/) (Cargo) >= 1.75.0
+- [Rust](https://www.rust-lang.org/) stable toolchain
 - [Make](https://www.gnu.org/software/make/) (optional, for running Makefile tasks)
 
 ### Setup
 
 ```bash
-git clone https://github.com/doggy8088/mcp-cli.git
+git clone https://github.com/Coooolfan/mcp-cli.git
 cd mcp-cli
 ```
 
@@ -675,6 +675,7 @@ Error [INVALID_JSON_ARGUMENTS]: Invalid JSON in tool arguments
 
 ## Credits
 
+- Thanks to [doggy8088/mcp-cli](https://github.com/doggy8088/mcp-cli), whose work this project builds on.
 - **[Philipp Schmid](https://github.com/philschmid)** - Creator of the original, excellent [Bun/TypeScript mcp-cli](https://github.com/philschmid/mcp-cli) project.
 - **[Antigravity](https://github.com/google-deepmind)** - Re-engineered and fully rewrote the codebase into this highly optimized, zero-dependency pure Rust CLI.
 
@@ -686,10 +687,27 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-### Install with npm
+## Windows
 
-```bash
-npm install -g @willh/mcp-cli
+Windows x64 and ARM64 are supported. Install with Cargo, or download `mcp-cli-win-x64.exe` / `mcp-cli-win-arm64.exe` from [Releases](https://github.com/Coooolfan/mcp-cli/releases), rename it to `mcp-cli.exe`, and add its directory to `PATH`. This project is no longer distributed through npm.
+
+```text
+cargo install --path .
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --all-features
 ```
 
-The npm package is a thin wrapper that downloads the native `mcp-cli` binary from the matching GitHub Release tag. For example, `@willh/mcp-cli@0.2.0` downloads assets from `v0.2.0`.
+Use stable Rust with the MSVC toolchain and Visual Studio C++ Build Tools. Makefile installation and Bash examples elsewhere in this document target Unix shells.
+
+User configuration paths use `USERPROFILE` on Windows, falling back to `HOME`. The first matching configuration file is used; files are not merged. Use forward slashes or escaped backslashes in JSON paths. Stdio commands support `.exe`, `.com`, `.cmd`, `.bat`, and extensionless commands such as `npx` resolved through `PATH`. Keep the program in `command` and its arguments in `args`. MCP servers may require their own runtimes; mcp-cli itself does not require Node.js.
+
+PowerShell can pipe JSON to avoid native argument quoting differences:
+
+```powershell
+mcp-cli -c "$env:USERPROFILE/.config/mcp/mcp_servers.json" info filesystem
+'{"path":"./README.md"}' | mcp-cli call filesystem read_file
+$env:MCP_NO_DAEMON = "1"
+```
+
+The daemon uses local named pipes on Windows and Unix sockets on Linux/macOS. Windows daemon metadata lives in the system user temporary directory under `mcp-cli`. Daemons run in a separate process group; Stdio process trees are managed through Windows Job Objects and cleaned up on close or daemon exit.

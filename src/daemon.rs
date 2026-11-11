@@ -2,15 +2,15 @@ use crate::config::{
     debug, get_config_hash, get_daemon_timeout_ms, get_pid_path, get_socket_dir, get_socket_path,
     ServerConfig,
 };
-use crate::errors::{CliError, ErrorCode};
+use crate::errors::CliError;
+#[cfg(unix)]
+use crate::errors::ErrorCode;
 use std::fs;
-#[cfg(windows)]
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 #[cfg(windows)]
-use tokio::net::TcpListener;
+use tokio::net::windows::named_pipe::ServerOptions;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -100,17 +100,13 @@ pub fn remove_pid_file(server_name: &str) {
 }
 
 pub fn remove_socket_file(server_name: &str) {
-    let socket_path = get_socket_path(server_name);
-    let _ = fs::remove_file(socket_path);
-}
-
-#[cfg(windows)]
-pub fn get_daemon_addr(server_name: &str, config_hash: &str) -> String {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    server_name.hash(&mut hasher);
-    config_hash.hash(&mut hasher);
-    let port = 40000 + (hasher.finish() % 20000);
-    format!("127.0.0.1:{}", port)
+    #[cfg(unix)]
+    {
+        let socket_path = get_socket_path(server_name);
+        let _ = fs::remove_file(socket_path);
+    }
+    #[cfg(windows)]
+    let _ = server_name;
 }
 
 #[cfg(unix)]
@@ -118,9 +114,9 @@ pub fn is_process_running(pid: i32) -> bool {
     unsafe { libc::kill(pid, 0) == 0 }
 }
 
-#[cfg(not(unix))]
-pub fn is_process_running(_pid: i32) -> bool {
-    true
+#[cfg(windows)]
+pub fn is_process_running(pid: i32) -> bool {
+    crate::platform::is_process_running(pid)
 }
 
 #[cfg(unix)]
@@ -128,9 +124,9 @@ pub fn kill_process(pid: i32) -> bool {
     unsafe { libc::kill(pid, libc::SIGTERM) == 0 }
 }
 
-#[cfg(not(unix))]
-pub fn kill_process(_pid: i32) -> bool {
-    false
+#[cfg(windows)]
+pub fn kill_process(pid: i32) -> bool {
+    crate::platform::kill_process(pid)
 }
 
 // ============================================================================
@@ -215,7 +211,6 @@ async fn handle_request(
 // ============================================================================
 
 pub async fn run_daemon(server_name: &str, config: ServerConfig) -> Result<(), CliError> {
-    #[cfg(unix)]
     let socket_path = get_socket_path(server_name);
     let config_hash = get_config_hash(&config);
     let timeout_ms = get_daemon_timeout_ms();
@@ -264,15 +259,11 @@ pub async fn run_daemon(server_name: &str, config: ServerConfig) -> Result<(), C
     })?;
 
     #[cfg(windows)]
-    let listener = TcpListener::bind(get_daemon_addr(server_name, &config_hash))
-        .await
-        .map_err(|e| crate::errors::CliError {
-            code: ErrorCode::ClientError,
-            error_type: "DAEMON_BIND_FAILED".to_string(),
-            message: format!("Failed to bind daemon TCP listener: {}", e),
-            details: None,
-            suggestion: Some("Check whether the daemon port is already in use".to_string()),
-        })?;
+    let mut listener = ServerOptions::new()
+        .first_pipe_instance(true)
+        .reject_remote_clients(true)
+        .create(&socket_path)
+        .map_err(|e| crate::errors::server_connection_error(server_name, &e.to_string()))?;
 
     // 5. Write PID File
     write_pid_file(server_name, &config_hash);
@@ -289,10 +280,22 @@ pub async fn run_daemon(server_name: &str, config: ServerConfig) -> Result<(), C
     // background loop for socket connections
     let mcp_conn_clone = Arc::clone(&mcp_conn_arc);
     let shutdown_tx_clone = shutdown_tx.clone();
-    tokio::spawn(async move {
+    let listener_task = tokio::spawn(async move {
         loop {
-            match listener.accept().await {
-                Ok((mut stream, _)) => {
+            #[cfg(unix)]
+            let accepted = listener.accept().await.map(|(stream, _)| stream);
+            #[cfg(windows)]
+            let accepted = async {
+                listener.connect().await?;
+                // Install the next listener before handing this connection to a task.
+                let next = ServerOptions::new()
+                    .reject_remote_clients(true)
+                    .create(&socket_path)?;
+                Ok::<_, std::io::Error>(std::mem::replace(&mut listener, next))
+            }
+            .await;
+            match accepted {
+                Ok(mut stream) => {
                     let mcp_conn_ref = Arc::clone(&mcp_conn_clone);
                     let sht_tx = shutdown_tx_clone.clone();
                     let act_tx = activity_tx.clone();
@@ -300,8 +303,11 @@ pub async fn run_daemon(server_name: &str, config: ServerConfig) -> Result<(), C
                     tokio::spawn(async move {
                         let _ = act_tx.send(()).await; // Signal activity to reset idle timer
 
-                        let mut buffer = vec![0u8; 65536];
-                        match stream.read(&mut buffer).await {
+                        let mut buffer = Vec::new();
+                        match BufReader::new(&mut stream)
+                            .read_until(b'\n', &mut buffer)
+                            .await
+                        {
                             Ok(n) => {
                                 if n > 0 {
                                     let response =
@@ -353,6 +359,9 @@ pub async fn run_daemon(server_name: &str, config: ServerConfig) -> Result<(), C
         }
     }
 
+    // Release the listener and its shared connection before closing the MCP process.
+    listener_task.abort();
+    let _ = listener_task.await;
     // Cleanup
     remove_socket_file(server_name);
     remove_pid_file(server_name);

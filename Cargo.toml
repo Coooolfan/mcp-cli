@@ -6,7 +6,7 @@ authors = ["Philipp Schmid", "Antigravity"]
 description = "A lightweight Rust CLI and library for interacting with MCP (Model Context Protocol) servers"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/doggy8088/mcp-cli"
+repository = "https://github.com/Coooolfan/mcp-cli"
 
 [lib]
 name = "mcp_cli"
@@ -29,6 +29,9 @@ chrono = { version = "0.4", features = ["serde"] }
 url = "2.5"
 rand = "0.8"
 libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading", "Win32_System_JobObjects", "Win32_System_Diagnostics_ToolHelp"] }
 
 [profile.release]
 opt-level = 3

@@ -312,10 +312,12 @@ Environment Variables:
 
 Config File:
   The CLI looks for mcp_servers.json in:
-    1. Path specified by MCP_CONFIG_PATH or -c/--config
-    2. ./mcp_servers.json (current directory)
-    3. ~/.mcp_servers.json
-    4. ~/.config/mcp/mcp_servers.json"#;
+    1. -c/--config path
+    2. MCP_CONFIG_PATH environment variable
+    3. ./mcp_servers.json (current directory)
+    4. ~/.mcp_servers.json
+    5. ~/.config/mcp/mcp_servers.json
+  On Windows, ~ uses USERPROFILE (falling back to HOME)."#;
     println!(
         "{}",
         help_text.replace("VERSION", env!("CARGO_PKG_VERSION"))

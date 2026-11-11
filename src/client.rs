@@ -27,6 +27,8 @@ pub struct StdioClient {
     pending_requests: PendingRequests,
     next_id: Arc<AtomicU64>,
     child: Arc<Mutex<Option<Child>>>,
+    #[cfg(windows)]
+    job: Arc<Mutex<Option<crate::platform::ProcessJob>>>,
 }
 
 impl StdioClient {
@@ -34,22 +36,25 @@ impl StdioClient {
         server_name: &str,
         config: &crate::config::StdioServerConfig,
     ) -> Result<Self, CliError> {
+        #[cfg(unix)]
         let mut cmd = Command::new(&config.command);
+        #[cfg(windows)]
+        let mut cmd = Command::new(crate::platform::resolve_command(config));
+        cmd.kill_on_drop(true);
+        #[cfg(windows)]
+        cmd.creation_flags(
+            windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+                | windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
+        );
         if let Some(ref args) = config.args {
             cmd.args(args);
         }
 
-        // Environment variables
-        let mut merged_env = HashMap::new();
-        for (k, v) in std::env::vars() {
-            merged_env.insert(k, v);
-        }
+        // Command inherits the parent environment. Apply overrides last; on Windows
+        // the process API also handles case-insensitive names such as PATH/Path.
         if let Some(ref env) = config.env {
-            for (k, v) in env {
-                merged_env.insert(k.clone(), v.clone());
-            }
+            cmd.envs(env);
         }
-        cmd.envs(merged_env);
 
         if let Some(ref cwd) = config.cwd {
             cmd.current_dir(cwd);
@@ -62,6 +67,23 @@ impl StdioClient {
         let mut child = cmd.spawn().map_err(|e| {
             server_connection_error(server_name, &format!("Failed to spawn process: {}", e))
         })?;
+
+        #[cfg(windows)]
+        let job = {
+            let job = crate::platform::ProcessJob::new()
+                .and_then(|job| {
+                    job.assign(child.id().unwrap())?;
+                    crate::platform::resume_process(child.id().unwrap())?;
+                    Ok(job)
+                })
+                .map_err(|e| {
+                    server_connection_error(
+                        server_name,
+                        &format!("Failed to manage server process: {}", e),
+                    )
+                })?;
+            Arc::new(Mutex::new(Some(job)))
+        };
 
         let stdin = child
             .stdin
@@ -187,6 +209,8 @@ impl StdioClient {
             pending_requests,
             next_id: Arc::new(AtomicU64::new(1)),
             child: Arc::new(Mutex::new(Some(child))),
+            #[cfg(windows)]
+            job,
         };
 
         // Handshake: initialize
@@ -329,6 +353,8 @@ impl StdioClient {
     }
 
     pub async fn close(self) -> Result<(), CliError> {
+        #[cfg(windows)]
+        self.job.lock().await.take();
         let mut child_guard = self.child.lock().await;
         if let Some(mut child) = child_guard.take() {
             let _ = child.kill().await;

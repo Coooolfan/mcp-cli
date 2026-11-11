@@ -12,6 +12,7 @@ pub mod daemon;
 pub mod daemon_client;
 pub mod errors;
 pub mod output;
+mod platform;
 
 pub use api::McpClient;
 pub use client::{get_connection, HttpClient, McpConnection, StdioClient};

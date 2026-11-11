@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 // ============================================================================
 // Types
@@ -208,18 +208,35 @@ pub fn get_daemon_timeout_ms() -> u64 {
 pub fn get_socket_dir() -> PathBuf {
     #[cfg(unix)]
     let uid = unsafe { libc::getuid() };
-    #[cfg(not(unix))]
-    let uid = "unknown";
+    #[cfg(unix)]
+    return PathBuf::from(format!("/tmp/mcp-cli-{}", uid));
 
-    PathBuf::from(format!("/tmp/mcp-cli-{}", uid))
+    #[cfg(windows)]
+    env::temp_dir().join("mcp-cli")
 }
 
 pub fn get_socket_path(server_name: &str) -> PathBuf {
-    get_socket_dir().join(format!("{}.sock", server_name))
+    #[cfg(unix)]
+    return get_socket_dir().join(format!("{}.sock", server_name));
+
+    #[cfg(windows)]
+    {
+        // Scope pipe names by the per-user temporary directory and hash arbitrary server names.
+        let identity = format!("{}:{}", get_socket_dir().display(), server_name);
+        let hash = hex::encode(Sha256::digest(identity.as_bytes()));
+        PathBuf::from(format!(r"\\.\pipe\mcp-cli-{}", &hash[..32]))
+    }
 }
 
 pub fn get_pid_path(server_name: &str) -> PathBuf {
-    get_socket_dir().join(format!("{}.pid", server_name))
+    #[cfg(unix)]
+    let filename = format!("{}.pid", server_name);
+    #[cfg(windows)]
+    let filename = format!(
+        "{}.pid",
+        hex::encode(Sha256::digest(server_name.as_bytes()))
+    );
+    get_socket_dir().join(filename)
 }
 
 // ============================================================================
@@ -331,6 +348,16 @@ fn substitute_value(val: serde_json::Value) -> Result<serde_json::Value, crate::
 // Config Loader
 // ============================================================================
 
+fn get_home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(home) = env::var_os("USERPROFILE").filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(home));
+    }
+    env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
 fn get_default_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
@@ -338,8 +365,7 @@ fn get_default_config_paths() -> Vec<PathBuf> {
     paths.push(PathBuf::from("./mcp_servers.json"));
 
     // 2. Home directory variants
-    if let Ok(home) = env::var("HOME") {
-        let home_path = Path::new(&home);
+    if let Some(home_path) = get_home_dir() {
         paths.push(home_path.join(".mcp_servers.json"));
         paths.push(home_path.join(".config/mcp/mcp_servers.json"));
     }
@@ -459,6 +485,19 @@ pub fn list_server_names(config: &McpServersConfig) -> Vec<String> {
 mod tests {
     use super::*;
     use std::env;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_server_names_are_safe_in_metadata_paths() {
+        let name = "plugin:server/with?invalid*characters";
+        let path = get_pid_path(name);
+        assert_eq!(path.parent().unwrap(), get_socket_dir());
+        assert_ne!(path, get_pid_path("other-server"));
+        assert_ne!(get_pid_path("Server"), get_pid_path("server"));
+        assert!(get_socket_path(name)
+            .to_string_lossy()
+            .starts_with(r"\\.\pipe\"));
+    }
 
     #[test]
     fn test_matches_pattern() {

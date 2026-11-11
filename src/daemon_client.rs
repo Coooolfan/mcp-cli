@@ -1,6 +1,4 @@
 use crate::config::{debug, get_config_hash, get_socket_dir, get_socket_path, ServerConfig};
-#[cfg(windows)]
-use crate::daemon::get_daemon_addr;
 use crate::daemon::{
     is_process_running, kill_process, read_pid_file, remove_pid_file, remove_socket_file,
     DaemonRequest, DaemonResponse,
@@ -9,9 +7,9 @@ use crate::errors::CliError;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 #[cfg(windows)]
-use tokio::net::TcpStream;
+use tokio::net::windows::named_pipe::ClientOptions;
 #[cfg(unix)]
 use tokio::net::UnixStream;
 
@@ -44,13 +42,24 @@ async fn send_request(
     }
     #[cfg(windows)]
     {
-        let _ = socket_path;
+        let _ = server_name;
+        let _ = config;
     }
 
     #[cfg(unix)]
     let connect_fut = UnixStream::connect(socket_path);
     #[cfg(windows)]
-    let connect_fut = TcpStream::connect(get_daemon_addr(server_name, &get_config_hash(config)));
+    let connect_fut = async {
+        loop {
+            match ClientOptions::new().open(socket_path) {
+                // Another client can briefly occupy the only available pipe instance.
+                Err(e) if e.raw_os_error() == Some(231) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                result => return result,
+            }
+        }
+    };
 
     let mut stream = tokio::select! {
         res = connect_fut => {
@@ -73,7 +82,7 @@ async fn send_request(
         }
     };
 
-    let serialized = serde_json::to_vec(&request).map_err(|e| crate::errors::CliError {
+    let mut serialized = serde_json::to_vec(&request).map_err(|e| crate::errors::CliError {
         code: crate::errors::ErrorCode::ClientError,
         error_type: "DAEMON_SERIALIZE_FAILED".to_string(),
         message: format!("Failed to serialize request: {}", e),
@@ -81,6 +90,7 @@ async fn send_request(
         suggestion: None,
     })?;
 
+    serialized.push(b'\n');
     if let Err(e) = stream.write_all(&serialized).await {
         return Err(crate::errors::CliError {
             code: crate::errors::ErrorCode::NetworkError,
@@ -101,7 +111,8 @@ async fn send_request(
     }
 
     let mut buffer = Vec::new();
-    let read_fut = stream.read_to_end(&mut buffer);
+    let mut reader = tokio::io::BufReader::new(stream);
+    let read_fut = reader.read_until(b'\n', &mut buffer);
 
     tokio::select! {
         res = read_fut => {
@@ -209,13 +220,18 @@ async fn spawn_daemon(server_name: &str, config: &ServerConfig) -> bool {
     };
 
     // Spawn detached process
-    let mut child = match tokio::process::Command::new(current_exe)
+    let mut command = tokio::process::Command::new(current_exe);
+    command
         .args(["--daemon", server_name, &config_json])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null()) // Don't forward stderr to console for daemon
-        .spawn()
-    {
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    command.creation_flags(
+        windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+            | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
+    );
+    let mut child = match command.spawn() {
         Ok(c) => c,
         Err(e) => {
             debug(&format!(
@@ -283,6 +299,7 @@ pub async fn get_daemon_connection(
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
+    #[cfg(unix)]
     if !socket_path.exists() {
         debug(&format!(
             "[daemon-client] Socket not found after spawn for {}",
@@ -341,17 +358,18 @@ pub async fn cleanup_orphaned_daemons() {
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("pid") {
-                if let Some(file_name) = path.file_stem().and_then(|s| s.to_str()) {
-                    let server_name = file_name;
-                    if let Some(pid_info) = read_pid_file(server_name) {
-                        if !is_process_running(pid_info.pid) {
-                            debug(&format!(
-                                "[daemon-client] Cleaning up orphaned daemon: {}",
-                                server_name
-                            ));
-                            remove_pid_file(server_name);
-                            remove_socket_file(server_name);
-                        }
+                let pid_info = fs::read_to_string(&path).ok().and_then(|content| {
+                    serde_json::from_str::<crate::daemon::PidFileContent>(&content).ok()
+                });
+                if let Some(pid_info) = pid_info {
+                    if !is_process_running(pid_info.pid) {
+                        debug(&format!(
+                            "[daemon-client] Cleaning up orphaned daemon: {}",
+                            path.display()
+                        ));
+                        let _ = fs::remove_file(&path);
+                        #[cfg(unix)]
+                        let _ = fs::remove_file(path.with_extension("sock"));
                     }
                 }
             }
