@@ -1,0 +1,97 @@
+name: Build release assets
+run-name: Build ${{ inputs.version }}
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      target_sha:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '构建版本号，不创建 tag 或 Release，例如 0.3.0-rc.1'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-assets:
+    name: 构建与测试 (${{ matrix.suffix }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            suffix: linux-x64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            suffix: linux-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            suffix: win-x64
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+            suffix: win-arm64
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+            suffix: darwin-x64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            suffix: darwin-arm64
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.target_sha || github.sha }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          components: rustfmt, clippy
+      - name: 写入本次构建版本号
+        run: python .github/scripts/release/set-version.py
+      - name: 格式检查
+        run: cargo fmt --all -- --check
+      - name: 静态检查
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: 测试
+        run: cargo test --locked --all-features
+      - name: 构建原生二进制
+        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: 核验版本并准备产物
+        env:
+          TARGET: ${{ matrix.target }}
+          SUFFIX: ${{ matrix.suffix }}
+        run: |
+          set -euo pipefail
+          ext=''
+          if [[ "$RUNNER_OS" == Windows ]]; then ext='.exe'; fi
+          binary="target/${TARGET}/release/mcp-cli${ext}"
+          actual_version="$("$binary" --version | tr -d '\r')"
+          if [[ "$actual_version" != "mcp-cli v${VERSION}" ]]; then
+            echo "::error::二进制版本不匹配: ${actual_version}"
+            exit 1
+          fi
+          mkdir -p dist
+          cp "$binary" "dist/mcp-cli-${SUFFIX}${ext}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.suffix }}
+          path: dist/
+          if-no-files-found: error
+

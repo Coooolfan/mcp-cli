@@ -62,15 +62,6 @@ clean: ## Remove compiled target files
 	@echo "==> Cleaning build artifacts..."
 	$(CARGO) clean
 
-.PHONY: release
-release: ## Trigger a new release (usage: make release VERSION=X.Y.Z)
-	@if [ -z "$(VERSION)" ]; then \
-		echo "Error: VERSION is required. Usage: make release VERSION=0.3.1"; \
-		exit 1; \
-	fi
-	@echo "==> Initiating release v$(VERSION)..."
-	./scripts/release.sh $(VERSION)
-
 .PHONY: help
 help: ## Show this help menu with descriptions of each command
 	@echo "mcp-cli Management Tasks:"

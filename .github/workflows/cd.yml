@@ -1,0 +1,108 @@
+name: CD
+run-name: Release ${{ inputs.version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '发布版本号，例如 0.3.0 或 0.3.0-rc.1，不带 v 前缀'
+        required: true
+        type: string
+      latest:
+        description: '标记为 Latest；旧版本补丁和预发布版本应关闭'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  prepare-release:
+    name: 预检
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      target_sha: ${{ steps.prepare.outputs.target_sha }}
+      prerelease: ${{ steps.prepare.outputs.prerelease }}
+      publish_latest: ${{ steps.prepare.outputs.publish_latest }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+      - name: 校验版本、发布说明与目标提交
+        id: prepare
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_LATEST: ${{ inputs.latest }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/release/prepare-release.sh
+
+  build-assets:
+    name: 构建与测试
+    needs: prepare-release
+    uses: ./.github/workflows/build.yml
+    with:
+      version: ${{ needs.prepare-release.outputs.version }}
+      target_sha: ${{ needs.prepare-release.outputs.target_sha }}
+
+  create-draft-release:
+    name: 创建 tag 与草稿 Release
+    needs: [prepare-release, build-assets]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare-release.outputs.target_sha }}
+      - name: 创建或复用草稿
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+          TARGET_SHA: ${{ needs.prepare-release.outputs.target_sha }}
+          PRERELEASE: ${{ needs.prepare-release.outputs.prerelease }}
+        run: bash .github/scripts/release/create-draft-release.sh
+
+  publish-release:
+    name: 上传产物并公开 Release
+    needs: [prepare-release, create-draft-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.prepare-release.outputs.version }}
+      PRERELEASE: ${{ needs.prepare-release.outputs.prerelease }}
+      PUBLISH_LATEST: ${{ needs.prepare-release.outputs.publish_latest }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: dist
+          merge-multiple: true
+      - name: 检查完整产物并生成校验和
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          assets=(mcp-cli-linux-x64 mcp-cli-linux-arm64
+            mcp-cli-win-x64.exe mcp-cli-win-arm64.exe
+            mcp-cli-darwin-x64 mcp-cli-darwin-arm64)
+          for asset in "${assets[@]}"; do test -s "$asset"; done
+          sha256sum "${assets[@]}" > checksums.txt
+      - name: 上传产物并公开
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$VERSION" --json isDraft --jq .isDraft)" = true
+          gh release upload "$VERSION" dist/* --clobber
+          gh release edit "$VERSION" --draft=false \
+            --prerelease="$PRERELEASE" --latest="$PUBLISH_LATEST"

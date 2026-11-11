@@ -633,7 +633,7 @@ cd mcp-cli
 
 ### Makefile 任务
 
-项目包含 `Makefile`，用于常见的开发、测试、安装与发布工作。执行 `make` 或 `make help` 可查看所有可用命令：
+项目包含 `Makefile`，用于常见的开发、测试和安装工作。执行 `make` 或 `make help` 可查看所有可用命令：
 
 ```bash
 $ make help
@@ -648,7 +648,6 @@ fmt                Check and enforce Rust formatting standards
 fmt-fix            Format all Rust source files automatically
 help               Show this help menu with descriptions of each command
 install            Install the compiled release binary to ~/.local/bin
-release            Trigger a new release (usage: make release VERSION=X.Y.Z)
 test               Run the native Rust unit tests
 uninstall          Remove the mcp-cli binary from ~/.local/bin
 --------------------------------------------------------
@@ -694,11 +693,20 @@ make uninstall
 
 ### 发布
 
-Releases 通过 GitHub Actions 自动化。可使用 Makefile task 触发 release，该 task 会调用 `scripts/release.sh`：
+在 [Actions → CD](https://github.com/Coooolfan/mcp-cli/actions/workflows/cd.yml) 手动运行工作流：
 
-```bash
-make release VERSION=0.3.0
-```
+1. 先在 `docs/release_notes/<version>.md` 编写发布说明，并提交、推送到待发布分支
+2. 选择分支，填写 `version`（如 `0.3.0`、`0.3.0-rc.1`，不带 `v`）和 `latest`（默认关闭）
+3. 工作流校验输入并锁定提交，在六个平台原生测试、构建，核验二进制版本号
+4. 构建全部成功后创建 tag 和草稿 Release，上传六个平台的二进制及 `checksums.txt`，最后统一公开
+
+仅验证构建时，可手动运行 [Build release assets](https://github.com/Coooolfan/mcp-cli/actions/workflows/build.yml)，填写构建版本号；它只生成 Actions 产物，不创建 tag 或 Release。CD 会调用同一个构建工作流。
+
+版本号只写入 CI 的构建副本，不修改仓库版本文件、不自动提交。新 tag 与输入版本相同，不带 `v`。预发布版本不允许标记为 Latest；Latest 只能从 `main` 当前 HEAD 发布。旧分支补丁关闭 `latest`，避免替换默认下载版本。
+
+同一版本可以重跑未公开的草稿，但 tag 必须指向相同提交；已公开的版本不能覆盖。上传或发布失败时草稿保持未公开，修复后重跑。构建失败不会创建 tag 或 Release。
+
+发布说明可使用项目内的 [release-note-creator](.agents/skills/release-note-creator/SKILL.md) 辅助编写。
 
 ### 错误信息
 

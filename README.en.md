@@ -592,7 +592,7 @@ cd mcp-cli
 
 ### Makefile Tasks
 
-The project includes a `Makefile` for common development, testing, installation, and release tasks. Run `make` or `make help` to view all available commands:
+The project includes a `Makefile` for common development, testing, and installation tasks. Run `make` or `make help` to view all available commands:
 
 ```bash
 $ make help
@@ -607,7 +607,6 @@ fmt                Check and enforce Rust formatting standards
 fmt-fix            Format all Rust source files automatically
 help               Show this help menu with descriptions of each command
 install            Install the compiled release binary to ~/.local/bin
-release            Trigger a new release (usage: make release VERSION=X.Y.Z)
 test               Run the native Rust unit tests
 uninstall          Remove the mcp-cli binary from ~/.local/bin
 --------------------------------------------------------
@@ -641,11 +640,20 @@ make uninstall
 
 ### Releasing
 
-Releases are automated via GitHub Actions. Trigger a release using the Makefile task (which calls `scripts/release.sh`):
+Run [Actions → CD](https://github.com/Coooolfan/mcp-cli/actions/workflows/cd.yml) manually:
 
-```bash
-make release VERSION=0.3.0
-```
+1. Commit and push `docs/release_notes/<version>.md` to the branch being released
+2. Select the branch, enter `version` (e.g. `0.3.0` or `0.3.0-rc.1`, without `v`), and choose `latest` (off by default)
+3. The workflow locks the selected commit, tests and builds all six native targets, and checks each binary's version
+4. Once all builds pass, it creates the tag and draft release, uploads all binaries and `checksums.txt`, then publishes the release
+
+To validate builds without publishing, run [Build release assets](https://github.com/Coooolfan/mcp-cli/actions/workflows/build.yml) with a build version. It only uploads workflow artifacts and creates no tag or release. CD calls the same reusable build workflow.
+
+Version stamping only changes the CI checkout; no version bump commit is created. New tags match the input version without a `v` prefix. Prereleases cannot be Latest. Latest releases must target the current `main` HEAD; leave `latest` off when patching an older branch.
+
+An unpublished draft can be retried only with the same tagged commit. Published versions cannot be overwritten. Failed uploads leave the draft unpublished; failed builds create no tag or release.
+
+Use the project-local [release-note-creator](.agents/skills/release-note-creator/SKILL.md) to draft release notes.
 
 ### Error Messages
 
