@@ -219,6 +219,15 @@ async fn spawn_daemon(server_name: &str, config: &ServerConfig) -> bool {
         }
     };
 
+    #[cfg(windows)]
+    if let Err(e) = crate::platform::prevent_stdio_inheritance() {
+        debug(&format!(
+            "[daemon-client] Failed to protect stdio handles: {}",
+            e
+        ));
+        return false;
+    }
+
     // Spawn detached process
     let mut command = tokio::process::Command::new(current_exe);
     command

@@ -4,8 +4,12 @@
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_TIMEOUT},
+    Foundation::{
+        CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE,
+        WAIT_TIMEOUT,
+    },
     System::{
+        Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE},
         Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
         },
@@ -190,6 +194,26 @@ pub fn resume_process(pid: u32) -> std::io::Result<()> {
         CloseHandle(thread);
         if resumed == u32::MAX {
             return Err(error);
+        }
+        Ok(())
+    }
+}
+
+// Rust duplicates explicitly configured stdio for each child, but Windows also
+// inherits any other inheritable handles. Do not let a long-lived daemon retain
+// the CLI's original output pipes: callers collecting output would wait for the
+// daemon to exit instead of returning when the CLI exits.
+#[cfg(windows)]
+pub fn prevent_stdio_inheritance() -> std::io::Result<()> {
+    unsafe {
+        for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+            let handle = GetStdHandle(id);
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+                continue;
+            }
+            if SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
         }
         Ok(())
     }

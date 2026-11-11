@@ -36,6 +36,9 @@ impl StdioClient {
         server_name: &str,
         config: &crate::config::StdioServerConfig,
     ) -> Result<Self, CliError> {
+        #[cfg(windows)]
+        crate::platform::prevent_stdio_inheritance()
+            .map_err(|e| server_connection_error(server_name, &e.to_string()))?;
         #[cfg(unix)]
         let mut cmd = Command::new(&config.command);
         #[cfg(windows)]
