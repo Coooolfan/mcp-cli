@@ -60,6 +60,7 @@ impl Server {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .env("MCP_NO_DAEMON", if daemon { "0" } else { "1" })
+            .env("MCP_DEBUG", "1")
             .env("MCP_DAEMON_TIMEOUT", "2")
             .env("MCP_MAX_RETRIES", "0");
         let mut child = command.kill_on_drop(true).spawn().unwrap();
@@ -75,6 +76,7 @@ impl Server {
             .await
             .unwrap()
             .unwrap();
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
         assert!(
             output.status.success(),
             "{}",
@@ -272,4 +274,32 @@ async fn windows_closes_server_process_tree() {
         .await
         .expect("server descendants must exit with the connection");
     }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_headless_daemon_startup() {
+    let server = Server::new(json!({"command": fixture()}));
+    let output = Command::new(env!("CARGO_BIN_EXE_mcp-cli"))
+        .args([
+            "--daemon",
+            &server.name,
+            &json!({"command": fixture()}).to_string(),
+        ])
+        .creation_flags(
+            windows_sys::Win32::System::Threading::CREATE_NO_WINDOW
+                | windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP,
+        )
+        .env("MCP_DEBUG", "1")
+        .env("MCP_DAEMON_TIMEOUT", "1")
+        .output()
+        .await
+        .unwrap();
+    eprintln!("daemon stdout: {}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("daemon stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "headless daemon startup must succeed"
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("DAEMON_READY"));
 }
