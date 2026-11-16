@@ -10,6 +10,7 @@ struct ParsedArgs {
     pattern: Option<String>,
     args: Option<String>,
     with_descriptions: bool,
+    json: bool,
     config_path: Option<String>,
 }
 
@@ -52,6 +53,7 @@ fn parse_args() -> ParsedArgs {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     let mut with_descriptions = false;
+    let mut json = false;
     let mut config_path = None;
     let mut positional = Vec::new();
 
@@ -68,6 +70,7 @@ fn parse_args() -> ParsedArgs {
                     pattern: None,
                     args: None,
                     with_descriptions: false,
+                    json: false,
                     config_path: None,
                 };
             }
@@ -79,8 +82,12 @@ fn parse_args() -> ParsedArgs {
                     pattern: None,
                     args: None,
                     with_descriptions: false,
+                    json: false,
                     config_path: None,
                 };
+            }
+            "--json" => {
+                json = true;
             }
             "-d" | "--with-descriptions" => {
                 with_descriptions = true;
@@ -106,6 +113,10 @@ fn parse_args() -> ParsedArgs {
         i += 1;
     }
 
+    if json && positional.is_empty() {
+        eprintln!("Error: --json requires info <server>");
+        std::process::exit(mcp_cli::errors::ErrorCode::ClientError.exit_code());
+    }
     if positional.is_empty() {
         return ParsedArgs {
             command: "list".to_string(),
@@ -114,15 +125,24 @@ fn parse_args() -> ParsedArgs {
             pattern: None,
             args: None,
             with_descriptions,
+            json,
             config_path,
         };
     }
 
     let first_arg = &positional[0];
+    if json && (first_arg != "info" || positional.len() != 2) {
+        eprintln!("Error: --json requires info <server> without a tool argument");
+        std::process::exit(mcp_cli::errors::ErrorCode::ClientError.exit_code());
+    }
 
     if first_arg == "info" {
         let remaining = &positional[1..];
-        let (server, tool) = parse_server_tool(remaining);
+        let (server, tool) = if json {
+            (remaining.first().cloned().unwrap_or_default(), None)
+        } else {
+            parse_server_tool(remaining)
+        };
 
         if server.is_empty() {
             let mut available_servers = Vec::new();
@@ -149,6 +169,7 @@ fn parse_args() -> ParsedArgs {
             pattern: None,
             args: None,
             with_descriptions,
+            json,
             config_path,
         };
     }
@@ -172,6 +193,7 @@ fn parse_args() -> ParsedArgs {
             pattern: Some(pattern),
             args: None,
             with_descriptions,
+            json,
             config_path,
         };
     }
@@ -219,6 +241,7 @@ fn parse_args() -> ParsedArgs {
             pattern: None,
             args: collected_args,
             with_descriptions,
+            json,
             config_path,
         };
     }
@@ -264,6 +287,7 @@ fn parse_args() -> ParsedArgs {
         pattern: None,
         args: None,
         with_descriptions,
+        json,
         config_path,
     }
 }
@@ -290,6 +314,7 @@ Options:
   -h, --help               Show this help message
   -v, --version            Show version number
   -d, --with-descriptions  Include tool descriptions
+  --json                   Emit full tool definitions as JSON (info <server> only)
   -c, --config <path>      Path to mcp_servers.json config file
 
 Output:
@@ -375,6 +400,7 @@ async fn main() {
 
             info_command(InfoOptions {
                 target,
+                json: parsed.json,
                 with_descriptions: parsed.with_descriptions,
                 config_path: parsed.config_path,
             })

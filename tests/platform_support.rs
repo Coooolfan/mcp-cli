@@ -303,3 +303,76 @@ async fn windows_headless_daemon_startup() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("DAEMON_READY"));
 }
+
+#[tokio::test]
+async fn json_discovery_preserves_nested_schema_and_filters_without_config() {
+    let server = Server::new(json!({"command": fixture(), "env": {"SECRET": "never-return-this"}}));
+    let discover = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_mcp-cli"));
+        command
+            .args([
+                "-c",
+                server.config.to_str().unwrap(),
+                "--json",
+                "info",
+                &server.name,
+            ])
+            .env("MCP_NO_DAEMON", "1");
+        command
+    };
+    let output = discover().output().await.unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let catalog: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(catalog["server_name"], server.name);
+    assert_eq!(catalog["tools"][0]["name"], "pid");
+    assert_eq!(
+        catalog["tools"][0]["inputSchema"]["properties"]["filter"]["properties"]["tags"]["items"]
+            ["type"],
+        "string"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("never-return-this"));
+    server.write(json!({"command": fixture(), "disabledTools": ["pid"]}));
+    let output = discover().output().await.unwrap();
+    assert!(output.status.success());
+    let catalog: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(catalog["tools"], json!([]));
+    let output = Command::new(env!("CARGO_BIN_EXE_mcp-cli"))
+        .args([
+            "-c",
+            server.config.to_str().unwrap(),
+            "call",
+            &server.name,
+            "pid",
+            "{}",
+        ])
+        .env("MCP_NO_DAEMON", "1")
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[tokio::test]
+async fn mcp_business_error_preserves_output_and_exits_nonzero() {
+    let server = Server::new(json!({"command": fixture(), "env": {"MCP_FIXTURE_ERROR": "1"}}));
+    let output = Command::new(env!("CARGO_BIN_EXE_mcp-cli"))
+        .args([
+            "-c",
+            server.config.to_str().unwrap(),
+            "call",
+            &server.name,
+            "pid",
+            "{}",
+        ])
+        .env("MCP_NO_DAEMON", "1")
+        .output()
+        .await
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("fixture business failure"));
+}

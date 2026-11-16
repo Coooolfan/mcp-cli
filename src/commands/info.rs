@@ -1,6 +1,7 @@
 use crate::errors::{server_connection_error, tool_not_found_error, CliError};
 
 pub struct InfoOptions {
+    pub json: bool,
     pub target: String, // "server" or "server/tool"
     pub with_descriptions: bool,
     pub config_path: Option<String>,
@@ -18,7 +19,11 @@ fn parse_target(target: &str) -> (String, Option<String>) {
 pub async fn info_command(options: InfoOptions) -> Result<(), CliError> {
     let config = crate::config::load_config(options.config_path.as_deref())?;
 
-    let (server_name, tool_name) = parse_target(&options.target);
+    let (server_name, tool_name) = if options.json {
+        (options.target.clone(), None)
+    } else {
+        parse_target(&options.target)
+    };
 
     let server_config = crate::config::get_server_config(&config, &server_name)?;
 
@@ -27,8 +32,19 @@ pub async fn info_command(options: InfoOptions) -> Result<(), CliError> {
         .map_err(|e| server_connection_error(&server_name, &e.message))?;
 
     let tools = connection.list_tools().await?;
+    let tools: Vec<_> = tools
+        .into_iter()
+        .filter(|tool| crate::config::is_tool_allowed(&tool.name, &server_config))
+        .collect();
 
-    if let Some(tool_name) = tool_name {
+    if options.json {
+        // ToolInfo uses the native MCP name/description/inputSchema wire contract.
+        // Never include transport configuration or credentials in discovery output.
+        println!(
+            "{}",
+            serde_json::json!({"server_name": server_name, "tools": tools})
+        );
+    } else if let Some(tool_name) = tool_name {
         // Show specific tool schema
         let tool = tools.iter().find(|t| t.name == tool_name);
 

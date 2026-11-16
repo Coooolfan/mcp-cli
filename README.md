@@ -708,6 +708,33 @@ make uninstall
 
 发布说明可使用项目内的 [release-note-creator](.agents/skills/release-note-creator/SKILL.md) 辅助编写。
 
+### 从 GitHub Release 生成后台清单
+
+本地运行 `package.sh`，不需要交叉编译环境。依赖已登录的 GitHub CLI (`gh`) 和 Python 3。
+
+```bash
+./package.sh                         # 从最近 100 个已公开 Release 中选择（包含预发布）
+./package.sh 0.3.0-rc.1               # 指定准确 tag
+./package.sh 0.3.0 ./dist/package     # 指定新输出目录
+```
+
+脚本从 `Coooolfan/mcp-cli` 下载该版本六个平台的二进制到 `dist/<tag>/`，
+本地计算 SHA-256，生成 `manifest.json` 和 `checksums.txt`。
+将 `manifest.json` 的完整 JSON 填入后台系统配置 `MCP_CLI_MANIFEST`。
+清单使用 `version` 与六个平台 `artifacts` 的 `url/sha256`；`x64/win` 文件名映射为后台的 `amd64/windows` 平台键。
+旧 `v` 前缀只从清单 version 中去除，下载 URL 保留准确 tag。
+
+脚本不编译、不执行下载的二进制、不上传、不修改 GitHub Release，也不写入后台配置。
+已存在的输出目录不会覆盖；下载失败或缺少任一平台的非空二进制时，不生成最终包。
+旧 Release 若缺少某个平台产物也会失败，不借用其他版本补齐。
+
+离线测试（使用本地 gh 替身，不访问 GitHub）：
+
+```bash
+python3.12 -m unittest discover -s tests/release -v
+bash -n package.sh
+```
+
 ### 错误信息
 
 所有错误都包含可操作的修复建议，适合人类与 AI agents 使用：
@@ -753,3 +780,15 @@ Error [INVALID_JSON_ARGUMENTS]: Invalid JSON in tool arguments
 ## 参与贡献
 
 欢迎通过 Pull Request 参与贡献。
+
+### JSON 工具发现
+
+`mcp-cli -c config.json --json info <server>` 输出单个 JSON 对象：
+
+```json
+{"server_name":"example","tools":[{"name":"search","description":"Search","inputSchema":{"type":"object","properties":{}}}]}
+```
+
+包含经过 allowedTools/disabledTools 过滤后的全部工具及完整嵌套 schema，不包含传输配置或凭据。
+`--json` 仅支持 `info <server>`，此时 server 名按原值解释，允许 `/`。
+`call` 保留原始输出；MCP `isError=true` 返回非零退出码，不能把它当作执行成功。

@@ -61,4 +61,4 @@ jobs:
       - name: Release guard and version stamping tests
         run: python -m unittest discover -s tests/release -v
       - name: Release script checks
-        run: shellcheck -x .github/scripts/release/*.sh
+        run: shellcheck -x package.sh .github/scripts/release/*.sh

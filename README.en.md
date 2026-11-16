@@ -655,6 +655,33 @@ An unpublished draft can be retried only with the same tagged commit. Published 
 
 Use the project-local [release-note-creator](.agents/skills/release-note-creator/SKILL.md) to draft release notes.
 
+### Generate a backend manifest from a GitHub Release
+
+Run `package.sh` locally with an authenticated GitHub CLI (`gh`) and Python 3; no cross-compilation is required.
+
+```bash
+./package.sh                        # Select from the latest 100 published releases, including prereleases
+./package.sh 0.3.0-rc.1              # Use an exact tag
+./package.sh 0.3.0 ./dist/package    # Use a new output directory
+```
+
+The script downloads all six native binaries from `Coooolfan/mcp-cli` into `dist/<tag>/`, computes SHA-256,
+and writes `manifest.json` and `checksums.txt`. Paste the complete manifest JSON into backend system config
+`MCP_CLI_MANIFEST`. The schema is `version` plus six `artifacts` entries containing `url` and `sha256`.
+Asset `x64/win` suffixes map to backend `amd64/windows` platform keys. A legacy `v` prefix is removed only
+from the manifest version; download URLs retain the exact tag.
+
+It never compiles, executes downloaded binaries, publishes, uploads, or writes backend configuration.
+Existing output directories are preserved. Failed downloads or missing/empty platform assets leave no final
+package; older releases missing an asset are rejected rather than combined with another version.
+
+Offline checks use a local `gh` fixture and never contact GitHub:
+
+```bash
+python3.12 -m unittest discover -s tests/release -v
+bash -n package.sh
+```
+
 ### Error Messages
 
 All errors include actionable recovery suggestions, optimized for both humans and AI agents:
@@ -719,3 +746,10 @@ $env:MCP_NO_DAEMON = "1"
 ```
 
 The daemon uses local named pipes on Windows and Unix sockets on Linux/macOS. Windows daemon metadata lives in the system user temporary directory under `mcp-cli`. Daemons run in a separate process group; Stdio process trees are managed through Windows Job Objects and cleaned up on close or daemon exit.
+
+### JSON tool discovery
+
+`mcp-cli -c config.json --json info <server>` emits one JSON object with `server_name` and `tools`.
+Each tool has native MCP `name`, `description`, and the complete `inputSchema`. Tool filters apply;
+transport configuration and credentials are excluded. `--json` accepts only `info <server>`;
+the server name is literal, including `/`. Calls retain their output but exit nonzero for MCP `isError=true`.

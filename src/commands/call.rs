@@ -70,6 +70,13 @@ pub async fn call_command(options: CallOptions) -> Result<(), CliError> {
 
     let server_config = crate::config::get_server_config(&config, &server_name)?;
 
+    if !crate::config::is_tool_allowed(&tool_name, &server_config) {
+        return Err(crate::errors::tool_execution_error(
+            &tool_name,
+            &server_name,
+            "Tool is disabled by server configuration",
+        ));
+    }
     let args = parse_args(options.args.as_deref()).await?;
 
     let connection = crate::client::get_connection(&server_name, &server_config)
@@ -80,6 +87,13 @@ pub async fn call_command(options: CallOptions) -> Result<(), CliError> {
         Ok(result) => {
             println!("{}", crate::output::format_tool_result(&result));
             let _ = connection.close().await;
+            if result.get("isError").and_then(serde_json::Value::as_bool) == Some(true) {
+                return Err(crate::errors::tool_execution_error(
+                    &tool_name,
+                    &server_name,
+                    "MCP server returned isError=true",
+                ));
+            }
             Ok(())
         }
         Err(error) => {

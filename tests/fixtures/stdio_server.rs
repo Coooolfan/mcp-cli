@@ -28,9 +28,13 @@ fn main() {
         let result = if line.contains("\"initialize\"") {
             r#"{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}"#.to_owned()
         } else if line.contains("\"tools/list\"") {
-            r#"{"tools":[{"name":"pid","description":"Process identity","inputSchema":{"type":"object"}}]}"#.to_owned()
+            r#"{"tools":[{"name":"pid","description":"Process identity","inputSchema":{"type":"object","properties":{"filter":{"type":"object","properties":{"tags":{"type":"array","items":{"type":"string"}}}}}}}]}"#.to_owned()
         } else if line.contains("\"tools/call\"") {
+            if std::env::var("MCP_FIXTURE_ERROR").as_deref() == Ok("1") {
+                r#"{"isError":true,"content":[{"type":"text","text":"fixture business failure"}]}"#.to_owned()
+            } else {
             format!(r#"{{"content":[{{"type":"text","text":"{}"}}]}}"#, std::process::id())
+            }
         } else { "{}".to_owned() };
         println!(r#"{{"jsonrpc":"2.0","id":{id},"result":{result}}}"#);
         io::stdout().flush().unwrap();
