@@ -24,7 +24,7 @@ A lightweight Rust CLI and library for interacting with [MCP (Model Context Prot
 ### 1. Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Coooolfan/mcp-cli/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Coooolfan/mcp-cli/main/scripts/install.sh | bash
 ```
 
 or 
@@ -657,21 +657,29 @@ Use the project-local [release-note-creator](.agents/skills/release-note-creator
 
 ### Generate a backend manifest from a GitHub Release
 
-Run `package.sh` locally with an authenticated GitHub CLI (`gh`) and Python 3; no cross-compilation is required.
+Run `scripts/package.sh` locally with an authenticated GitHub CLI (`gh`) and Python 3; no cross-compilation is required.
 
 ```bash
-./package.sh                        # Select from the latest 100 published releases, including prereleases
-./package.sh 0.3.0-rc.1              # Use an exact tag
-./package.sh 0.3.0 ./dist/package    # Use a new output directory
+./scripts/package.sh --select https://static.example.com/mcp-cli
+./scripts/package.sh 0.2.0 https://static.example.com/mcp-cli
+./scripts/package.sh 0.2.0 https://static.example.com/mcp-cli ./dist/package
 ```
 
-The script downloads all six native binaries from `Coooolfan/mcp-cli` into `dist/<tag>/`, computes SHA-256,
-and writes `manifest.json` and `checksums.txt`. Paste the complete manifest JSON into backend system config
-`MCP_CLI_MANIFEST`. The schema is `version` plus six `artifacts` entries containing `url` and `sha256`.
-Asset `x64/win` suffixes map to backend `amd64/windows` platform keys. A legacy `v` prefix is removed only
-from the manifest version; download URLs retain the exact tag.
+Arguments are an exact release tag (or `--select`), a required download base URL, and an optional new output directory.
+`--select` lists the latest 100 published releases, including prereleases. The base URL must use HTTPS without
+credentials, query, fragment, whitespace, or quotes. Trailing slashes are removed.
 
-It never compiles, executes downloaded binaries, publishes, uploads, or writes backend configuration.
+Binaries are downloaded from `Coooolfan/mcp-cli` on GitHub. Output defaults to the project root's `dist/<version>/`,
+containing six binaries, `manifest.json`, and `checksums.txt`. Manifest URLs use
+`<download-base-url>/<version>/<binary>`, matching the Skill Scan release convention.
+Upload the binaries to that location before pasting the complete manifest into backend system config `MCP_CLI_MANIFEST`.
+For example, version `0.2.0` and base `https://static.example.com/mcp-cli` produce
+`https://static.example.com/mcp-cli/0.2.0/mcp-cli-darwin-arm64`.
+
+The manifest schema is `version` plus six `artifacts` entries containing `url` and `sha256`.
+Asset `x64/win` suffixes map to backend `amd64/windows` platform keys. A legacy `v` prefix is preserved in the
+GitHub download request but removed from the manifest version, local version directory, and hosted URLs.
+The script never compiles, executes downloaded binaries, publishes, uploads, or writes backend configuration.
 Existing output directories are preserved. Failed downloads or missing/empty platform assets leave no final
 package; older releases missing an asset are rejected rather than combined with another version.
 
@@ -679,7 +687,7 @@ Offline checks use a local `gh` fixture and never contact GitHub:
 
 ```bash
 python3.12 -m unittest discover -s tests/release -v
-bash -n package.sh
+bash -n scripts/package.sh scripts/install.sh
 ```
 
 ### Error Messages
