@@ -655,7 +655,7 @@ An unpublished draft can be retried only with the same tagged commit. Published 
 
 Use the project-local [release-note-creator](.agents/skills/release-note-creator/SKILL.md) to draft release notes.
 
-### Generate a backend manifest from a GitHub Release
+### Package binaries for backend distribution
 
 Run `scripts/package.sh` locally with an authenticated GitHub CLI (`gh`) and Python 3; no cross-compilation is required.
 
@@ -669,16 +669,13 @@ Arguments are an exact release tag (or `--select`), a required download base URL
 `--select` lists the latest 100 published releases, including prereleases. The base URL must use HTTPS without
 credentials, query, fragment, whitespace, or quotes. Trailing slashes are removed.
 
-Binaries are downloaded from `Coooolfan/mcp-cli` on GitHub. Output defaults to the project root's `dist/<version>/`,
-containing six binaries, `manifest.json`, and `checksums.txt`. Manifest URLs use
-`<download-base-url>/<version>/<binary>`, matching the Skill Scan release convention.
-Upload the binaries to that location before pasting the complete manifest into backend system config `MCP_CLI_MANIFEST`.
-For example, version `0.2.0` and base `https://static.example.com/mcp-cli` produce
+The script downloads six native binaries from `Coooolfan/mcp-cli` on GitHub. The output directory defaults to
+`dist/<version>/` in the project root. Upload the binaries to `<download-base-url>/<version>/`, then set the
+printed `MCP_CLI_VERSION` and `MCP_CLI_BASE_URL` in the backend system configuration.
+For example, version `0.2.0` and base URL `https://static.example.com/mcp-cli` give macOS arm64 devices the URL
 `https://static.example.com/mcp-cli/0.2.0/mcp-cli-darwin-arm64`.
 
-The manifest schema is `version` plus six `artifacts` entries containing `url` and `sha256`.
-Asset `x64/win` suffixes map to backend `amd64/windows` platform keys. A legacy `v` prefix is preserved in the
-GitHub download request but removed from the manifest version, local version directory, and hosted URLs.
+The GitHub download request keeps a legacy `v` tag prefix. The backend version, output directory and hosted URLs omit it.
 The script never compiles, executes downloaded binaries, publishes, uploads, or writes backend configuration.
 Existing output directories are preserved. Failed downloads or missing/empty platform assets leave no final
 package; older releases missing an asset are rejected rather than combined with another version.

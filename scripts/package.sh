@@ -8,8 +8,8 @@ REPOSITORY='Coooolfan/mcp-cli'
 usage() {
     echo "Usage: $0 <release-tag|--select> <download-base-url> [output-directory]"
     echo 'Use --select to choose from the latest 100 published releases (including prereleases).'
-    echo 'Manifest URLs use <download-base-url>/<version>/<binary>; upload the package there separately.'
-    echo 'Downloads six native binaries and generates manifest.json for MCP_CLI_MANIFEST.'
+    echo 'Upload the binaries to <download-base-url>/<version>/ separately.'
+    echo 'Downloads six native binaries and prints MCP_CLI_VERSION and MCP_CLI_BASE_URL.'
     echo 'Requires gh and python3. Does not compile or publish anything.'
 }
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then usage; exit 0; fi
@@ -71,42 +71,14 @@ patterns=()
 for asset in "${assets[@]}"; do patterns+=(--pattern "$asset"); done
 gh release download "$release_tag" --repo "$REPOSITORY" --dir "$staging" "${patterns[@]}"
 
-python3 - "$staging" "$release_version" "$download_base_url" <<'PY'
-import hashlib
-import json
-from pathlib import Path
-import sys
-
-folder, version, base_url = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
-assets = {
-    "darwin-amd64": "mcp-cli-darwin-x64",
-    "darwin-arm64": "mcp-cli-darwin-arm64",
-    "linux-amd64": "mcp-cli-linux-x64",
-    "linux-arm64": "mcp-cli-linux-arm64",
-    "windows-amd64": "mcp-cli-win-x64.exe",
-    "windows-arm64": "mcp-cli-win-arm64.exe",
-}
-artifacts, checksums = {}, []
-for platform, name in assets.items():
-    path = folder / name
-    if not path.is_file() or path.stat().st_size == 0:
-        raise SystemExit(f"Missing or empty release binary: {name}")
-    digest = hashlib.sha256()
-    with path.open("rb") as binary:
-        for chunk in iter(lambda: binary.read(1024 * 1024), b""):
-            digest.update(chunk)
-    checksum = digest.hexdigest()
-    artifacts[platform] = {
-        "url": f"{base_url}/{version}/{name}",
-        "sha256": checksum,
-    }
-    checksums.append(f"{checksum}  {name}\n")
-(folder / "manifest.json").write_text(
-    json.dumps({"version": version, "artifacts": artifacts}, indent=2) + "\n", encoding="utf-8")
-(folder / "checksums.txt").write_text("".join(checksums), encoding="utf-8")
-PY
+for asset in "${assets[@]}"; do
+    if [[ ! -f "$staging/$asset" || ! -s "$staging/$asset" ]]; then
+        echo "Missing or empty release binary: $asset" >&2
+        exit 1
+    fi
+done
 mv -- "$staging" "$output_directory"
 trap - EXIT HUP INT TERM
 echo "Packaged release ${release_tag}: ${output_directory}"
-echo "Upload the binaries to ${download_base_url}/${release_version}/ before using the manifest."
-echo "Paste ${output_directory}/manifest.json into system config MCP_CLI_MANIFEST."
+echo "Upload the binaries to ${download_base_url}/${release_version}/, then set these values in /admin/system-config:"
+printf 'MCP_CLI_VERSION=%s\nMCP_CLI_BASE_URL=%s\n' "$release_version" "$download_base_url"

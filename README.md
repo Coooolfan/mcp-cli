@@ -708,7 +708,7 @@ make uninstall
 
 发布说明可使用项目内的 [release-note-creator](.agents/skills/release-note-creator/SKILL.md) 辅助编写。
 
-### 从 GitHub Release 生成后台清单
+### 从 GitHub Release 下载后台分发包
 
 本地运行 `scripts/package.sh`，不需要交叉编译环境。依赖已登录的 GitHub CLI (`gh`) 和 Python 3。
 
@@ -722,15 +722,12 @@ make uninstall
 `--select` 从最近 100 个已公开 Release 中选择，包含预发布版本。
 下载根 URL 必须是 HTTPS 地址，不含凭据、query、fragment、空白或引号，末尾 `/` 会去除。
 
-脚本仍从 `Coooolfan/mcp-cli` GitHub Release 下载六个平台的原生二进制，
-默认输出到工程根目录的 `dist/<version>/`，本地生成 `manifest.json` 和 `checksums.txt`。
-清单 URL 使用 `<download-base-url>/<version>/<binary>`，与 Skill Scan 的 release 脚本约定一致。
-先将二进制上传到该地址，再把 `manifest.json` 的完整 JSON 填入后台 `MCP_CLI_MANIFEST`。
-例如 `0.2.0` 和 `https://static.example.com/mcp-cli` 会生成：
+脚本从 `Coooolfan/mcp-cli` GitHub Release 下载六个平台的原生二进制，默认输出到工程根目录的 `dist/<version>/`。
+将这些文件上传到 `<download-base-url>/<version>/`，再把脚本输出的 `MCP_CLI_VERSION` 和 `MCP_CLI_BASE_URL` 填入后台系统配置。
+例如版本 `0.2.0` 和 Base URL `https://static.example.com/mcp-cli` 对应的 macOS arm64 下载地址为
 `https://static.example.com/mcp-cli/0.2.0/mcp-cli-darwin-arm64`。
 
-清单使用 `version` 与六个平台 `artifacts` 的 `url/sha256`；`x64/win` 文件名映射为后台的 `amd64/windows` 平台键。
-旧 tag 的 `v` 前缀保留在 GitHub 下载请求中，在清单 version、本地版本目录及最终托管 URL 中去除。
+旧 tag 的 `v` 前缀保留在 GitHub 下载请求中，在后台配置版本、本地版本目录及最终托管 URL 中去除。
 脚本不编译、不执行下载的二进制、不上传、不修改 GitHub Release，也不写入后台配置。
 已存在的输出目录不会覆盖；下载失败或缺少任一平台的非空二进制时，不生成最终包。
 旧 Release 若缺少某个平台产物也会失败，不借用其他版本补齐。

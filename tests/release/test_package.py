@@ -1,5 +1,4 @@
 """Run package.sh against fake GitHub releases; do not download or execute binaries."""
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -62,26 +61,20 @@ else:
         return subprocess.run(["bash", str(self.script), *args], cwd=self.root,
                               env=dict(self.env, **env), input=input, capture_output=True, text=True)
 
-    def test_downloads_six_native_assets_and_generates_matching_manifest(self):
+    def test_downloads_six_native_assets_and_prints_release_configuration(self):
         result = self.run_package("0.3.0-rc.1", self.base_url + "/", str(self.output))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        manifest = json.loads((self.output / "manifest.json").read_text())
-        self.assertEqual(manifest["version"], "0.3.0-rc.1")
-        self.assertEqual(set(manifest["artifacts"]), set(ASSETS))
-        for platform, name in ASSETS.items():
-            self.assertEqual(manifest["artifacts"][platform], {
-                "url": f"{self.base_url}/0.3.0-rc.1/{name}",
-                "sha256": hashlib.sha256((self.output / name).read_bytes()).hexdigest(),
-            })
-        self.assertEqual(len((self.output / "checksums.txt").read_text().splitlines()), 6)
+        self.assertEqual({path.name for path in self.output.iterdir()}, set(ASSETS.values()))
+        self.assertIn("MCP_CLI_VERSION=0.3.0-rc.1", result.stdout.splitlines())
+        self.assertIn(f"MCP_CLI_BASE_URL={self.base_url}", result.stdout.splitlines())
         self.assertFalse(list(self.root.glob(".mcp-package.*")))
 
     def test_selects_release_and_uses_normalized_version_in_hosted_urls(self):
         result = self.run_package("--select", self.base_url, input="9\n2\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        manifest = json.loads((self.root / "dist/0.2.0/manifest.json").read_text())
-        self.assertEqual(manifest["version"], "0.2.0")
-        self.assertEqual(manifest["artifacts"]["windows-amd64"]["url"], self.base_url + "/0.2.0/mcp-cli-win-x64.exe")
+        self.assertTrue((self.root / "dist/0.2.0/mcp-cli-win-x64.exe").is_file())
+        self.assertIn("MCP_CLI_VERSION=0.2.0", result.stdout.splitlines())
+        self.assertIn(f"Upload the binaries to {self.base_url}/0.2.0/", result.stdout)
         commands = [json.loads(line) for line in Path(self.env["GH_LOG"]).read_text().splitlines()]
         self.assertEqual(next(args[2] for args in commands if args[:2] == ["release", "download"]), "v0.2.0")
         self.assertIn("Invalid selection", result.stderr)
@@ -97,7 +90,7 @@ else:
 
     def test_does_not_overwrite_existing_directory(self):
         self.output.mkdir()
-        marker = self.output / "manifest.json"
+        marker = self.output / "marker.txt"
         marker.write_text("existing")
         result = self.run_package("0.3.0", self.base_url, str(self.output))
         self.assertNotEqual(result.returncode, 0)
