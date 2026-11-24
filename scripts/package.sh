@@ -6,36 +6,16 @@ ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 REPOSITORY='Coooolfan/mcp-cli'
 
 usage() {
-    echo "Usage: $0 <release-tag|--select> <download-base-url> [output-directory]"
+    echo "Usage: $0 <release-tag|--select> [output-directory]"
     echo 'Use --select to choose from the latest 100 published releases (including prereleases).'
     echo 'Upload the binaries to <download-base-url>/<version>/ separately.'
-    echo 'Downloads six native binaries and prints MCP_CLI_VERSION and MCP_CLI_BASE_URL.'
-    echo 'Requires gh and python3. Does not compile or publish anything.'
+    echo 'Downloads six native binaries and prints MCP_CLI_VERSION.'
+    echo 'Requires gh. Does not compile or publish anything.'
 }
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then usage; exit 0; fi
-if [[ $# -lt 2 || $# -gt 3 ]]; then usage >&2; exit 2; fi
-for tool in gh python3; do
-    command -v "$tool" >/dev/null 2>&1 || { echo "Required command unavailable: $tool" >&2; exit 1; }
-done
+if [[ $# -lt 1 || $# -gt 2 ]]; then usage >&2; exit 2; fi
+command -v gh >/dev/null 2>&1 || { echo "Required command unavailable: gh" >&2; exit 1; }
 
-download_base_url="$(python3 - "$2" <<'PYBASE'
-import sys
-from urllib.parse import urlsplit
-value = sys.argv[1]
-try:
-    url = urlsplit(value)
-    url.port  # Validate an explicitly supplied port
-    valid = (value.startswith("https://") and url.hostname and url.username is None and url.password is None
-             and "?" not in value and "#" not in value
-             and not any(character.isspace() or ord(character) < 32 for character in value)
-             and not any(character in value for character in "\\\"'"))
-except ValueError:
-    valid = False
-if not valid:
-    raise SystemExit("Download base URL must be HTTPS without credentials, query, fragment, spaces or quotes")
-print(value.rstrip("/"))
-PYBASE
-)"
 release_tag="$1"
 if [[ "$release_tag" == --select ]]; then
     release_tag=''
@@ -56,7 +36,7 @@ is_draft="$(gh release view "$release_tag" --repo "$REPOSITORY" --json isDraft -
 if [[ "$is_draft" != false ]]; then echo 'Only published releases can be packaged' >&2; exit 1; fi
 
 release_version="${release_tag#v}"
-output_directory="${3:-${ROOT_DIR}/dist/${release_version}}"
+output_directory="${2:-${ROOT_DIR}/dist/${release_version}}"
 if [[ -e "$output_directory" || -L "$output_directory" ]]; then
     echo "Output already exists; choose a new directory: $output_directory" >&2
     exit 1
@@ -80,5 +60,5 @@ done
 mv -- "$staging" "$output_directory"
 trap - EXIT HUP INT TERM
 echo "Packaged release ${release_tag}: ${output_directory}"
-echo "Upload the binaries to ${download_base_url}/${release_version}/, then set these values in /admin/system-config:"
-printf 'MCP_CLI_VERSION=%s\nMCP_CLI_BASE_URL=%s\n' "$release_version" "$download_base_url"
+echo "Upload the binaries to <download-base-url>/${release_version}/, then configure MCP_CLI_BASE_URL in /admin/system-config."
+printf 'MCP_CLI_VERSION=%s\n' "$release_version"

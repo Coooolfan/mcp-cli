@@ -712,22 +712,21 @@ make uninstall
 
 ### 从 GitHub Release 下载后台分发包
 
-本地运行 `scripts/package.sh`，不需要交叉编译环境。依赖已登录的 GitHub CLI (`gh`) 和 Python 3。
+本地运行 `scripts/package.sh`，需要已登录的 GitHub CLI (`gh`)。
 
 ```bash
-./scripts/package.sh --select https://static.example.com/mcp-cli
-./scripts/package.sh 0.2.0 https://static.example.com/mcp-cli
-./scripts/package.sh 0.2.0 https://static.example.com/mcp-cli ./dist/package
+./scripts/package.sh --select
+./scripts/package.sh 0.3.0
+./scripts/package.sh 0.3.0 ./dist/package
 ```
 
-参数依次为准确 Release tag（或 `--select`）、必填下载根 URL、可选新输出目录。
+参数依次为准确 Release tag（或 `--select`）和可选的新输出目录。
 `--select` 从最近 100 个已公开 Release 中选择，包含预发布版本。
-下载根 URL 必须是 HTTPS 地址，不含凭据、query、fragment、空白或引号，末尾 `/` 会去除。
 
 脚本从 `Coooolfan/mcp-cli` GitHub Release 下载六个平台的原生二进制，默认输出到工程根目录的 `dist/<version>/`。
-将这些文件上传到 `<download-base-url>/<version>/`，再把脚本输出的 `MCP_CLI_VERSION` 和 `MCP_CLI_BASE_URL` 填入后台系统配置。
-例如版本 `0.2.0` 和 Base URL `https://static.example.com/mcp-cli` 对应的 macOS arm64 下载地址为
-`https://static.example.com/mcp-cli/0.2.0/mcp-cli-darwin-arm64`。
+将这些文件上传到 `<download-base-url>/<version>/`，再把脚本输出的 `MCP_CLI_VERSION` 和实际托管的 HTTPS 下载根地址 `MCP_CLI_BASE_URL` 填入后台系统配置。
+例如版本 `0.3.0` 和 Base URL `https://static.example.com/mcp-cli` 对应的 macOS arm64 下载地址为
+`https://static.example.com/mcp-cli/0.3.0/mcp-cli-darwin-arm64`。
 
 旧 tag 的 `v` 前缀保留在 GitHub 下载请求中，在后台配置版本、本地版本目录及最终托管 URL 中去除。
 脚本不编译、不执行下载的二进制、不上传、不修改 GitHub Release，也不写入后台配置。

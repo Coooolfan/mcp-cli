@@ -55,26 +55,25 @@ else:
         for key in ["GH_MISSING", "GH_EMPTY", "GH_FAIL", "GH_DRAFT", "GH_CANDIDATES"]:
             self.env.pop(key, None)
         self.output = self.root / "output directory"
-        self.base_url = "https://downloads.example.invalid/mcp-cli"
 
     def run_package(self, *args, input="", **env):
         return subprocess.run(["bash", str(self.script), *args], cwd=self.root,
                               env=dict(self.env, **env), input=input, capture_output=True, text=True)
 
-    def test_downloads_six_native_assets_and_prints_release_configuration(self):
-        result = self.run_package("0.3.0-rc.1", self.base_url + "/", str(self.output))
+    def test_downloads_six_native_assets_and_prints_release_version(self):
+        result = self.run_package("0.3.0-rc.1", str(self.output))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual({path.name for path in self.output.iterdir()}, set(ASSETS.values()))
         self.assertIn("MCP_CLI_VERSION=0.3.0-rc.1", result.stdout.splitlines())
-        self.assertIn(f"MCP_CLI_BASE_URL={self.base_url}", result.stdout.splitlines())
+        self.assertNotIn("MCP_CLI_BASE_URL=", result.stdout)
         self.assertFalse(list(self.root.glob(".mcp-package.*")))
 
     def test_selects_release_and_uses_normalized_version_in_hosted_urls(self):
-        result = self.run_package("--select", self.base_url, input="9\n2\n")
+        result = self.run_package("--select", input="9\n2\n")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((self.root / "dist/0.2.0/mcp-cli-win-x64.exe").is_file())
         self.assertIn("MCP_CLI_VERSION=0.2.0", result.stdout.splitlines())
-        self.assertIn(f"Upload the binaries to {self.base_url}/0.2.0/", result.stdout)
+        self.assertIn("Upload the binaries to <download-base-url>/0.2.0/", result.stdout)
         commands = [json.loads(line) for line in Path(self.env["GH_LOG"]).read_text().splitlines()]
         self.assertEqual(next(args[2] for args in commands if args[:2] == ["release", "download"]), "v0.2.0")
         self.assertIn("Invalid selection", result.stderr)
@@ -83,7 +82,7 @@ else:
         for override in [{"GH_MISSING": "mcp-cli-win-x64.exe"},
                          {"GH_EMPTY": "mcp-cli-linux-x64"}, {"GH_FAIL": "true"}]:
             with self.subTest(override=override):
-                result = self.run_package("0.3.0", self.base_url, str(self.output), **override)
+                result = self.run_package("0.3.0", str(self.output), **override)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(self.output.exists())
                 self.assertFalse(list(self.root.glob(".mcp-package.*")))
@@ -92,32 +91,28 @@ else:
         self.output.mkdir()
         marker = self.output / "marker.txt"
         marker.write_text("existing")
-        result = self.run_package("0.3.0", self.base_url, str(self.output))
+        result = self.run_package("0.3.0", str(self.output))
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(marker.read_text(), "existing")
         self.assertNotIn('"download"', Path(self.env["GH_LOG"]).read_text())
 
     def test_rejects_invalid_tags_and_drafts(self):
         for tag in ["../0.3.0", "0.3.0;touch injected", "01.2.3"]:
-            self.assertNotEqual(self.run_package(tag, self.base_url, str(self.output)).returncode, 0)
+            self.assertNotEqual(self.run_package(tag, str(self.output)).returncode, 0)
         self.assertFalse(Path(self.env["GH_LOG"]).exists())
-        self.assertNotEqual(self.run_package("0.3.0", self.base_url, str(self.output), GH_DRAFT="true").returncode, 0)
+        self.assertNotEqual(self.run_package("0.3.0", str(self.output), GH_DRAFT="true").returncode, 0)
         self.assertFalse(self.output.exists())
         self.assertFalse((self.root / "injected").exists())
 
-    def test_requires_valid_download_base_url_before_contacting_github(self):
-        self.assertNotEqual(self.run_package("0.3.0").returncode, 0)
-        for base in ["", "http://example.invalid", "HTTPS://example.invalid", "/local/path", "https://user:secret@example.invalid",
-                     "https://example.invalid/?token=value", "https://example.invalid/#fragment",
-                     "https://example.invalid/?", "https://example.invalid/#", "https://example.invalid:invalid",
-                     "https://example.invalid/with space", "https://[invalid", "https://example.invalid/\n"]:
-            with self.subTest(base=base):
-                self.assertNotEqual(self.run_package("0.3.0", base).returncode, 0)
+    def test_rejects_wrong_argument_count_before_contacting_github(self):
+        self.assertNotEqual(self.run_package().returncode, 0)
+        result = self.run_package("0.3.0", "https://downloads.example.invalid/mcp-cli", str(self.output))
+        self.assertNotEqual(result.returncode, 0)
         self.assertFalse(Path(self.env["GH_LOG"]).exists())
 
     def test_no_candidates_or_no_selection_does_not_default_to_latest(self):
-        self.assertNotEqual(self.run_package("--select", self.base_url, GH_CANDIDATES="").returncode, 0)
-        self.assertNotEqual(self.run_package("--select", self.base_url, input="").returncode, 0)
+        self.assertNotEqual(self.run_package("--select", GH_CANDIDATES="").returncode, 0)
+        self.assertNotEqual(self.run_package("--select", input="").returncode, 0)
         self.assertFalse((self.root / "dist").exists())
 
 

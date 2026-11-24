@@ -657,23 +657,22 @@ Use the project-local [release-note-creator](.agents/skills/release-note-creator
 
 ### Package binaries for backend distribution
 
-Run `scripts/package.sh` locally with an authenticated GitHub CLI (`gh`) and Python 3; no cross-compilation is required.
+Run `scripts/package.sh` locally with an authenticated GitHub CLI (`gh`).
 
 ```bash
-./scripts/package.sh --select https://static.example.com/mcp-cli
-./scripts/package.sh 0.2.0 https://static.example.com/mcp-cli
-./scripts/package.sh 0.2.0 https://static.example.com/mcp-cli ./dist/package
+./scripts/package.sh --select
+./scripts/package.sh 0.3.0
+./scripts/package.sh 0.3.0 ./dist/package
 ```
 
-Arguments are an exact release tag (or `--select`), a required download base URL, and an optional new output directory.
-`--select` lists the latest 100 published releases, including prereleases. The base URL must use HTTPS without
-credentials, query, fragment, whitespace, or quotes. Trailing slashes are removed.
+Arguments are an exact release tag (or `--select`) and an optional new output directory.
+`--select` lists the latest 100 published releases, including prereleases.
 
 The script downloads six native binaries from `Coooolfan/mcp-cli` on GitHub. The output directory defaults to
 `dist/<version>/` in the project root. Upload the binaries to `<download-base-url>/<version>/`, then set the
-printed `MCP_CLI_VERSION` and `MCP_CLI_BASE_URL` in the backend system configuration.
-For example, version `0.2.0` and base URL `https://static.example.com/mcp-cli` give macOS arm64 devices the URL
-`https://static.example.com/mcp-cli/0.2.0/mcp-cli-darwin-arm64`.
+printed `MCP_CLI_VERSION` and the actual HTTPS download root `MCP_CLI_BASE_URL` in the backend system configuration.
+For example, version `0.3.0` and base URL `https://static.example.com/mcp-cli` give macOS arm64 devices the URL
+`https://static.example.com/mcp-cli/0.3.0/mcp-cli-darwin-arm64`.
 
 The GitHub download request keeps a legacy `v` tag prefix. The backend version, output directory and hosted URLs omit it.
 The script never compiles, executes downloaded binaries, publishes, uploads, or writes backend configuration.
