@@ -32,6 +32,8 @@ fn main() {
         } else if line.contains("\"tools/call\"") {
             if std::env::var("MCP_FIXTURE_ERROR").as_deref() == Ok("1") {
                 r#"{"isError":true,"content":[{"type":"text","text":"fixture business failure"}]}"#.to_owned()
+            } else if let Ok(result) = std::env::var("MCP_FIXTURE_RESULT") {
+                result
             } else {
             format!(r#"{{"content":[{{"type":"text","text":"{}"}}]}}"#, std::process::id())
             }

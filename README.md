@@ -11,7 +11,7 @@
 - **轻量**：纯 Rust 实现，依赖少，启动快。
 - **独立可执行文件**：可通过 Cargo 编译成完整优化的独立可执行文件，不需要外部运行时。
 - **Rust 库**：可在其他 Rust 应用程序中使用相同的 MCP 客户端功能。
-- **适合 Shell 使用**：`call` 命令输出 JSON，适合搭配 `jq`、管道和 shell 脚本。
+- **适合 Shell 使用**：`call` 命令将结果写到 stdout，方便在管道和脚本中使用。
 - **面向 Agent**：设计给 AI coding agents 使用，例如 Gemini CLI、Claude Code 等。
 - **通用连接**：支持 stdio 与 HTTP MCP 服务器。
 - **连接池**：按需启动后台进程以复用连接，默认空闲 60 秒后退出。
@@ -132,6 +132,8 @@ mcp-cli [options] call <server> <tool> <json> 使用 JSON arguments 调用 tool
 |---|---|
 | stdout | Tool results 与 human-readable info |
 | stderr | Errors 与 diagnostics |
+
+`call` 会把返回的图片解码到执行机器的系统临时目录。纯图片结果每张图输出一行绝对路径，混合结果按原顺序输出说明文字和图片路径。图片在命令退出后仍可读取，使用后可删除对应临时目录。
 
 ### Rust 库
 
@@ -261,8 +263,8 @@ Input Schema:
 # 使用 inline JSON
 $ mcp-cli call github search_repositories '{"query": "mcp server", "per_page": 5}'
 
-# call 命令默认输出 JSON，适合 pipe 给 jq
-$ mcp-cli call github search_repositories '{"query": "mcp"}' | jq '.content[0].text'
+# 文本结果直接输出，其他无图片、无文本的结果保留 JSON
+$ mcp-cli call github search_repositories '{"query": "mcp"}'
 
 # 从 stdin 读取 JSON，不需要使用 -
 $ echo '{"path": "./README.md"}' | mcp-cli call filesystem read_file

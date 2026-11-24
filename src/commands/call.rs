@@ -1,5 +1,7 @@
-use crate::errors::CliError;
-use std::io::IsTerminal;
+use crate::errors::{CliError, ErrorCode};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use serde_json::Value;
+use std::io::{self, IsTerminal};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 
@@ -85,8 +87,18 @@ pub async fn call_command(options: CallOptions) -> Result<(), CliError> {
 
     match connection.call_tool(&tool_name, args).await {
         Ok(result) => {
-            println!("{}", crate::output::format_tool_result(&result));
+            let output = format_call_output(&result);
             let _ = connection.close().await;
+            println!(
+                "{}",
+                output.map_err(|error| CliError {
+                    code: ErrorCode::ClientError,
+                    error_type: "IMAGE_OUTPUT_FAILED".to_string(),
+                    message: format!("Failed to save MCP image: {error}"),
+                    details: None,
+                    suggestion: None,
+                })?
+            );
             if result.get("isError").and_then(serde_json::Value::as_bool) == Some(true) {
                 return Err(crate::errors::tool_execution_error(
                     &tool_name,
@@ -117,5 +129,77 @@ pub async fn call_command(options: CallOptions) -> Result<(), CliError> {
 
             Err(err)
         }
+    }
+}
+
+fn format_call_output(result: &Value) -> io::Result<String> {
+    let Some(content) = result.get("content").and_then(Value::as_array) else {
+        return Ok(crate::output::format_tool_result(result));
+    };
+
+    if !content.iter().any(|block| image_payload(block).is_some()) {
+        return Ok(crate::output::format_tool_result(result));
+    }
+
+    let directory = tempfile::Builder::new()
+        .prefix("mcp-cli-images-")
+        .tempdir()?;
+    let absolute_dir = std::path::absolute(directory.path())?;
+    let mut lines = Vec::new();
+    for (index, block) in content.iter().enumerate() {
+        if let Some((image, data_field)) = image_payload(block) {
+            let mime = image["mimeType"].as_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "Missing image MIME type")
+            })?;
+            let data = image[data_field]
+                .as_str()
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Missing image data"))?;
+            let bytes = STANDARD
+                .decode(data)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid image Base64"))?;
+            let extension = match mime {
+                "image/png" => "png",
+                "image/jpeg" => "jpg",
+                "image/gif" => "gif",
+                "image/webp" => "webp",
+                "image/bmp" => "bmp",
+                "image/tiff" => "tiff",
+                "image/svg+xml" => "svg",
+                "image/avif" => "avif",
+                _ => "img",
+            };
+            let path = absolute_dir.join(format!("image-{}.{extension}", index + 1));
+            let displayed_path = path.to_str().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Temporary path is not valid UTF-8",
+                )
+            })?;
+            std::fs::write(&path, bytes)?;
+            lines.push(displayed_path.to_owned());
+        } else if block["type"].as_str() == Some("text") {
+            if let Some(text) = block["text"].as_str() {
+                lines.push(text.to_owned());
+            }
+        } else {
+            lines.push(block.to_string());
+        }
+    }
+
+    // Keep the files accessible to the caller after this process exits.
+    let _ = directory.keep();
+    Ok(lines.join("\n"))
+}
+
+fn image_payload(block: &Value) -> Option<(&Value, &'static str)> {
+    match block["type"].as_str()? {
+        "image" => Some((block, "data")),
+        "resource" => {
+            let resource = block.get("resource")?;
+            let mime = resource.get("mimeType")?.as_str()?;
+            (mime.starts_with("image/") && resource.get("blob").is_some())
+                .then_some((resource, "blob"))
+        }
+        _ => None,
     }
 }

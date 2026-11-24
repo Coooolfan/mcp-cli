@@ -47,6 +47,14 @@ impl Server {
         .unwrap();
     }
     async fn call(&self, daemon: bool, args: &str) -> String {
+        self.call_with_temp_dir(daemon, args, None).await
+    }
+    async fn call_with_temp_dir(
+        &self,
+        daemon: bool,
+        args: &str,
+        temp_dir: Option<&Path>,
+    ) -> String {
         let mut command = Command::new(env!("CARGO_BIN_EXE_mcp-cli"));
         command
             .args([
@@ -63,6 +71,12 @@ impl Server {
             .env("MCP_DEBUG", "1")
             .env("MCP_DAEMON_TIMEOUT", "2")
             .env("MCP_MAX_RETRIES", "0");
+        if let Some(temp_dir) = temp_dir {
+            command
+                .env("TEMP", temp_dir)
+                .env("TMP", temp_dir)
+                .env("TMPDIR", temp_dir);
+        }
         let mut child = command.kill_on_drop(true).spawn().unwrap();
         use tokio::io::AsyncWriteExt;
         child
@@ -94,6 +108,43 @@ impl Drop for Server {
         mcp_cli::daemon::remove_socket_file(&self.name);
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+#[tokio::test]
+async fn call_saves_images_to_system_temp_and_prints_paths() {
+    let image = json!({"type":"image", "mimeType":"image/png", "data":"AAEC"});
+    let resource = json!({
+        "type":"resource",
+        "resource":{"uri":"fixture://image", "mimeType":"image/jpeg", "blob":"AwQF"}
+    });
+    let content = json!([{"type":"text", "text":"Image caption"}, image, resource]);
+    let result = json!({"content":content}).to_string();
+    let server = Server::new(json!({
+        "command":fixture(),
+        "env":{"MCP_FIXTURE_RESULT":result}
+    }));
+    let temp_dir = server.dir.join("图片 temp");
+    std::fs::create_dir(&temp_dir).unwrap();
+    let stdout = server
+        .call_with_temp_dir(false, "{}", Some(&temp_dir))
+        .await;
+    let mut lines = stdout.lines();
+    assert_eq!(lines.next(), Some("Image caption"));
+    let png = PathBuf::from(lines.next().unwrap());
+    let jpg = PathBuf::from(lines.next().unwrap());
+    assert_eq!(lines.next(), None);
+    let directory = png.parent().unwrap();
+    assert!(png.is_absolute());
+    assert_eq!(
+        directory.parent().unwrap().canonicalize().unwrap(),
+        temp_dir.canonicalize().unwrap()
+    );
+    assert!(png.to_str().unwrap().contains("图片 temp"));
+    assert_eq!(jpg.parent(), Some(directory));
+    assert_eq!(png.extension().unwrap(), "png");
+    assert_eq!(jpg.extension().unwrap(), "jpg");
+    assert_eq!(std::fs::read(&png).unwrap(), [0, 1, 2]);
+    assert_eq!(std::fs::read(&jpg).unwrap(), [3, 4, 5]);
 }
 
 #[tokio::test]
